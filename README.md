@@ -19,6 +19,10 @@ I built a reproducible pipeline that takes nine raw CSV files, validates and loa
 - How long do orders take to arrive, and how often do they arrive after the estimated date?
 - How does delivery performance relate to customer review scores?
 
+## Data source and attribution
+
+Data source: Olist, [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce), listed on Kaggle under the **CC BY-NC-SA 4.0** license. This repository contains the project code and documentation; the source CSV files are not included. The repository has no separate license for its code yet, and any future code license should remain distinct from the dataset's terms.
+
 ## Project at a glance
 
 The local run represented in this project loaded **99,441 orders** from nine source CSVs, including **112,650 order items**, **103,886 payments**, and **99,224 reviews**. The analysis covers 24 monthly periods and 98,199 eligible orders. Nine database quality checks and eight automated tests passed in the current codebase.
