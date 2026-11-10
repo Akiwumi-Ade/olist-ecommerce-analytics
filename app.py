@@ -64,15 +64,15 @@ left, right = st.columns(2)
 with left:
     st.subheader("Monthly sales")
     fig = px.line(monthly, x="order_month", y="gross_merchandise_value", markers=True, labels={"order_month":"Month", "gross_merchandise_value":"GMV (R$)"})
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 with right:
     st.subheader("Top product categories")
-    st.plotly_chart(px.bar(categories, x="gmv", y="category", orientation="h", labels={"gmv":"GMV (R$)","category":"Category"}).update_layout(yaxis={"categoryorder":"total ascending"}), use_container_width=True)
+    st.plotly_chart(px.bar(categories, x="gmv", y="category", orientation="h", labels={"gmv":"GMV (R$)","category":"Category"}).update_layout(yaxis={"categoryorder":"total ascending"}), width="stretch")
 left, right = st.columns(2)
 with left:
     st.subheader("Sales by customer state")
-    st.plotly_chart(px.bar(states.head(12), x="state", y="gmv", labels={"state":"State","gmv":"GMV (R$)"}), use_container_width=True)
+    st.plotly_chart(px.bar(states.head(12), x="state", y="gmv", labels={"state":"State","gmv":"GMV (R$)"}), width="stretch")
 with right:
     st.subheader("Delivery performance by status")
-    st.dataframe(delivery, use_container_width=True, hide_index=True)
+    st.dataframe(delivery, width="stretch", hide_index=True)
 st.caption("GMV and average order value use order-item price and freight. Late delivery compares actual customer delivery with the estimated date.")
