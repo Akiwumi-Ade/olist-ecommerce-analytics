@@ -52,7 +52,7 @@ Run the tests with `pytest`. They cover source-file discovery, transformation ru
 
 ## Model and pipeline
 
-The `public` schema contains normalized source entities: customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Primary keys and foreign keys are created from `sql/schema.sql`; CSVs load in dependency order using bounded chunks. The ETL validates required files and columns, parses dates/numbers, checks key uniqueness and referential integrity, then refreshes the tables.
+The `public` schema contains normalized source entities: customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Primary keys and foreign keys are created from `sql/schema.sql`; reviews use the composite key `(review_id, order_id)` because the source reuses `review_id` across different orders. CSVs load in dependency order using bounded chunks. The ETL validates required files and columns, parses dates/numbers, checks key uniqueness and referential integrity, then refreshes the tables.
 
 `sql/analytics.sql` creates two query-ready views: `analytics.order_line_facts` (one row per order item, with customer, product, seller, delivery, payment, and review context) and `analytics.monthly_sales` (monthly KPI aggregates). The Streamlit app uses read-only SQL queries against these views.
 

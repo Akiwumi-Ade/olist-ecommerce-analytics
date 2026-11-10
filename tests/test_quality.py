@@ -27,3 +27,26 @@ def test_validate_data_dir_accepts_complete_minimal_files(tmp_path: Path):
         pd.DataFrame(columns=REQUIRED_COLUMNS[key]).to_csv(tmp_path / name, index=False)
     result = validate_data_dir(tmp_path)
     assert set(result) == set(EXPECTED_FILES)
+
+
+def _write_minimal_dataset(folder: Path, review_rows):
+    from olist_analytics.config import EXPECTED_FILES
+    from olist_analytics.quality import REQUIRED_COLUMNS
+    for key, name in EXPECTED_FILES.items():
+        rows = review_rows if key == "reviews" else []
+        pd.DataFrame(rows, columns=REQUIRED_COLUMNS[key]).to_csv(folder / name, index=False)
+
+def test_review_id_may_repeat_across_orders(tmp_path: Path):
+    _write_minimal_dataset(tmp_path, [
+        {"review_id": "same-review", "order_id": "order-1", "review_score": 5},
+        {"review_id": "same-review", "order_id": "order-2", "review_score": 4},
+    ])
+    assert "reviews" in validate_data_dir(tmp_path)
+
+def test_duplicate_review_and_order_pair_is_rejected(tmp_path: Path):
+    _write_minimal_dataset(tmp_path, [
+        {"review_id": "same-review", "order_id": "order-1", "review_score": 5},
+        {"review_id": "same-review", "order_id": "order-1", "review_score": 4},
+    ])
+    with pytest.raises(ValueError, match="duplicate key values for: review_id, order_id"):
+        validate_data_dir(tmp_path)

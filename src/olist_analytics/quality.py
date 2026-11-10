@@ -6,6 +6,18 @@ import pandas as pd
 
 from .config import EXPECTED_FILES
 
+SOURCE_KEYS = {
+    "customers": ["customer_id"],
+    "sellers": ["seller_id"],
+    "products": ["product_id"],
+    "category_translation": ["product_category_name"],
+    "orders": ["order_id"],
+    "order_items": ["order_id", "order_item_id"],
+    "payments": ["order_id", "payment_sequential"],
+    # Olist review_id is reused across orders; the natural key is the pair.
+    "reviews": ["review_id", "order_id"],
+}
+
 REQUIRED_COLUMNS = {
     "customers": ["customer_id", "customer_unique_id", "customer_zip_code_prefix", "customer_city", "customer_state"],
     "geolocation": ["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng", "geolocation_city", "geolocation_state"],
@@ -28,6 +40,11 @@ def validate_data_dir(folder: Path) -> dict[str, Path]:
         absent = sorted(set(REQUIRED_COLUMNS[key]) - set(columns))
         if absent:
             raise ValueError(f"{path.name} is missing required columns: {', '.join(absent)}")
+        key_columns = SOURCE_KEYS.get(key)
+        if key_columns:
+            keys = pd.read_csv(path, usecols=key_columns)
+            if keys.duplicated(key_columns).any():
+                raise ValueError(f"{path.name} contains duplicate key values for: {', '.join(key_columns)}")
     return paths
 
 def check_database(engine) -> list[dict[str, object]]:

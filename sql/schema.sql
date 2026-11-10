@@ -32,9 +32,15 @@ CREATE TABLE IF NOT EXISTS payments (
  PRIMARY KEY(order_id, payment_sequential)
 );
 CREATE TABLE IF NOT EXISTS reviews (
- review_id text PRIMARY KEY, order_id text NOT NULL REFERENCES orders(order_id), review_score integer NOT NULL CHECK (review_score BETWEEN 1 AND 5),
- review_comment_title text, review_comment_message text, review_creation_date timestamp, review_answer_timestamp timestamp
+ review_id text NOT NULL, order_id text NOT NULL REFERENCES orders(order_id),
+ review_score integer NOT NULL CHECK (review_score BETWEEN 1 AND 5),
+ review_comment_title text, review_comment_message text, review_creation_date timestamp, review_answer_timestamp timestamp,
+ PRIMARY KEY (review_id, order_id)
 );
+-- The public Olist data reuses review_id across different orders. Migrate older
+-- project databases from the original single-column key before loading.
+ALTER TABLE reviews DROP CONSTRAINT IF EXISTS reviews_pkey;
+ALTER TABLE reviews ADD CONSTRAINT reviews_pkey PRIMARY KEY (review_id, order_id);
 CREATE TABLE IF NOT EXISTS geolocation (
  geolocation_zip_code_prefix integer NOT NULL, geolocation_lat numeric(10,7), geolocation_lng numeric(10,7),
  geolocation_city text, geolocation_state text
