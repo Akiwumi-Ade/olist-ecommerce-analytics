@@ -2,77 +2,225 @@
 from __future__ import annotations
 
 import os
+from datetime import date
+
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
 load_dotenv()
 st.set_page_config(page_title="Olist Commerce Analytics", page_icon="🛒", layout="wide")
 st.title("Brazilian E-Commerce Analytics")
-st.caption("Olist marketplace operations, sales, delivery, and customer experience")
+st.caption("Sales, delivery performance, and customer experience across the Olist marketplace")
+
 
 @st.cache_resource
 def engine_for(url: str):
     return create_engine(url, pool_pre_ping=True)
+
+
+def query_df(engine, sql: str, params: dict | None = None) -> pd.DataFrame:
+    return pd.read_sql_query(text(sql), engine, params=params or {})
+
 
 url = os.getenv("DATABASE_URL")
 if not url:
     st.error("Set DATABASE_URL in .env before launching the dashboard.")
     st.stop()
 engine = engine_for(url)
+
 try:
-    months = pd.read_sql(text("SELECT min(order_month) AS min_month, max(order_month) AS max_month FROM analytics.monthly_sales"), engine)
-    if months.empty or pd.isna(months.iloc[0, 0]):
+    bounds = query_df(
+        engine,
+        "SELECT min(order_month) AS first_month, max(order_month) AS last_month "
+        "FROM analytics.monthly_sales",
+    )
+    if bounds.empty or pd.isna(bounds.loc[0, "first_month"]):
         st.info("No analytics data yet. Run the ETL pipeline first.")
         st.stop()
-    monthly = pd.read_sql(text("SELECT * FROM analytics.monthly_sales ORDER BY order_month"), engine)
-    states = pd.read_sql(text("""SELECT c.customer_state AS state, count(DISTINCT o.order_id) AS orders,
-        sum(i.price) AS gmv FROM orders o JOIN customers c USING(customer_id)
-        JOIN order_items i USING(order_id) WHERE o.order_status NOT IN ('canceled','unavailable')
-        GROUP BY 1 ORDER BY gmv DESC"""), engine)
-    categories = pd.read_sql(text("""SELECT COALESCE(ct.product_category_name_english,p.product_category_name,'Unknown') AS category,
-        sum(i.price) AS gmv FROM order_items i JOIN products p USING(product_id)
-        LEFT JOIN category_translation ct USING(product_category_name)
-        JOIN orders o USING(order_id) WHERE o.order_status NOT IN ('canceled','unavailable')
-        GROUP BY 1 ORDER BY gmv DESC LIMIT 12"""), engine)
-    delivery = pd.read_sql(text("""SELECT order_status, count(*) AS orders,
-        avg(EXTRACT(EPOCH FROM (order_delivered_customer_date-order_purchase_timestamp))/86400.0) AS avg_days,
-        avg((order_delivered_customer_date > order_estimated_delivery_date)::int)*100 AS late_pct
-        FROM orders WHERE order_delivered_customer_date IS NOT NULL GROUP BY 1 ORDER BY orders DESC"""), engine)
-except Exception as exc:
+
+    first_month = pd.to_datetime(bounds.loc[0, "first_month"]).date()
+    last_month = pd.to_datetime(bounds.loc[0, "last_month"]).date()
+    st.sidebar.header("Filters")
+    selected = st.sidebar.date_input(
+        "Order month range",
+        value=(first_month, last_month),
+        min_value=first_month,
+        max_value=last_month,
+    )
+    if isinstance(selected, tuple) and len(selected) == 2:
+        start_date, end_date = selected
+    elif isinstance(selected, date):
+        start_date = end_date = selected
+    else:
+        st.info("Choose a start and end month to view the dashboard.")
+        st.stop()
+
+    # The date picker works at month grain; include the full selected end month.
+    start_month = pd.Timestamp(start_date).replace(day=1)
+    end_month_exclusive = pd.Timestamp(end_date).replace(day=1) + pd.offsets.MonthBegin(1)
+    params = {"start_month": start_month, "end_month": end_month_exclusive}
+    date_filter = "order_month >= :start_month AND order_month < :end_month"
+
+    monthly = query_df(
+        engine,
+        f"SELECT * FROM analytics.monthly_sales WHERE {date_filter} ORDER BY order_month",
+        params,
+    )
+    if monthly.empty:
+        st.warning("No data in the selected month range.")
+        st.stop()
+
+    buyers = query_df(
+        engine,
+        f"""SELECT count(DISTINCT customer_unique_id) AS buyers
+        FROM analytics.order_line_facts
+        WHERE {date_filter} AND order_status NOT IN ('canceled', 'unavailable')""",
+        params,
+    )
+    categories = query_df(
+        engine,
+        f"""SELECT category, sum(price) AS gmv
+        FROM analytics.order_line_facts
+        WHERE {date_filter} AND order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY category ORDER BY gmv DESC LIMIT 12""",
+        params,
+    )
+    states = query_df(
+        engine,
+        f"""SELECT c.customer_state AS state, sum(f.price) AS gmv
+        FROM analytics.order_line_facts f
+        JOIN customers c USING (customer_id)
+        WHERE {date_filter} AND f.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY c.customer_state ORDER BY gmv DESC LIMIT 12""",
+        params,
+    )
+    delivery = query_df(
+        engine,
+        """SELECT order_status,
+            count(*) AS orders,
+            avg(EXTRACT(EPOCH FROM (order_delivered_customer_date - order_purchase_timestamp)) / 86400.0) AS avg_delivery_days,
+            100.0 * count(*) FILTER (WHERE order_delivered_customer_date > order_estimated_delivery_date)
+                / NULLIF(count(*) FILTER (WHERE order_estimated_delivery_date IS NOT NULL), 0) AS late_delivery_pct
+        FROM orders
+        WHERE order_purchase_timestamp >= :start_month
+          AND order_purchase_timestamp < :end_month
+          AND order_delivered_customer_date IS NOT NULL
+        GROUP BY order_status ORDER BY orders DESC""",
+        params,
+    )
+    review_delivery = query_df(
+        engine,
+        """WITH reviews_by_order AS (
+            SELECT order_id, avg(review_score)::numeric(3,1) AS review_score
+            FROM reviews GROUP BY order_id
+        )
+        SELECT r.review_score, count(*) AS orders,
+            avg(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400.0) AS avg_delivery_days,
+            100.0 * count(*) FILTER (WHERE o.order_delivered_customer_date > o.order_estimated_delivery_date)
+                / NULLIF(count(*) FILTER (WHERE o.order_estimated_delivery_date IS NOT NULL), 0) AS late_delivery_pct
+        FROM orders o JOIN reviews_by_order r USING (order_id)
+        WHERE o.order_purchase_timestamp >= :start_month
+          AND o.order_purchase_timestamp < :end_month
+          AND o.order_delivered_customer_date IS NOT NULL
+        GROUP BY r.review_score ORDER BY r.review_score""",
+        params,
+    )
+except SQLAlchemyError as exc:
     st.error(f"Could not query the analytics database: {exc}")
     st.stop()
 
-st.sidebar.header("Date range")
-min_date, max_date = pd.to_datetime(monthly.order_month.min()).date(), pd.to_datetime(monthly.order_month.max()).date()
-date_range = st.sidebar.date_input("Order month", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    monthly = monthly[(pd.to_datetime(monthly.order_month).dt.date >= date_range[0]) & (pd.to_datetime(monthly.order_month).dt.date <= date_range[1])]
+st.sidebar.divider()
+st.sidebar.caption(
+    "GMV is item price before freight. Average order value includes item price and freight. "
+    "Late delivery means delivery after the estimated date."
+)
 
-if monthly.empty:
-    st.warning("No data in the selected date range.")
-    st.stop()
+orders = int(monthly["orders"].sum())
+gmv = float(monthly["gross_merchandise_value"].sum())
+order_value = float(monthly["item_and_freight_value"].sum())
+aov = order_value / orders if orders else 0
+unique_buyers = int(buyers.loc[0, "buyers"])
+
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Orders", f"{int(monthly.orders.sum()):,}")
-k2.metric("GMV", f"R$ {monthly.gross_merchandise_value.sum():,.0f}")
-k3.metric("Unique customers", f"{int(monthly.customers.sum()):,}")
-k4.metric("Average order value", f"R$ {monthly.average_order_value.mean():,.2f}")
+k1.metric("Orders", f"{orders:,}")
+k2.metric("GMV", f"R$ {gmv:,.0f}")
+k3.metric("Unique buyers", f"{unique_buyers:,}")
+k4.metric("Average order value", f"R$ {aov:,.2f}")
 
 left, right = st.columns(2)
 with left:
     st.subheader("Monthly sales")
-    fig = px.line(monthly, x="order_month", y="gross_merchandise_value", markers=True, labels={"order_month":"Month", "gross_merchandise_value":"GMV (R$)"})
+    fig = px.line(
+        monthly,
+        x="order_month",
+        y="gross_merchandise_value",
+        markers=True,
+        labels={"order_month": "Month", "gross_merchandise_value": "GMV (R$)"},
+    )
     st.plotly_chart(fig, width="stretch")
 with right:
-    st.subheader("Top product categories")
-    st.plotly_chart(px.bar(categories, x="gmv", y="category", orientation="h", labels={"gmv":"GMV (R$)","category":"Category"}).update_layout(yaxis={"categoryorder":"total ascending"}), width="stretch")
+    st.subheader("Monthly orders")
+    fig = px.bar(
+        monthly,
+        x="order_month",
+        y="orders",
+        labels={"order_month": "Month", "orders": "Orders"},
+    )
+    st.plotly_chart(fig, width="stretch")
+
 left, right = st.columns(2)
 with left:
-    st.subheader("Sales by customer state")
-    st.plotly_chart(px.bar(states.head(12), x="state", y="gmv", labels={"state":"State","gmv":"GMV (R$)"}), width="stretch")
+    st.subheader("Top product categories")
+    fig = px.bar(
+        categories,
+        x="gmv",
+        y="category",
+        orientation="h",
+        labels={"gmv": "GMV (R$)", "category": "Category"},
+    ).update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig, width="stretch")
 with right:
-    st.subheader("Delivery performance by status")
+    st.subheader("Top customer states")
+    fig = px.bar(
+        states,
+        x="gmv",
+        y="state",
+        orientation="h",
+        labels={"gmv": "GMV (R$)", "state": "State"},
+    ).update_layout(yaxis={"categoryorder": "total ascending"})
+    st.plotly_chart(fig, width="stretch")
+
+left, right = st.columns(2)
+with left:
+    st.subheader("Delivery performance by order status")
+    delivery = delivery.rename(
+        columns={
+            "order_status": "Order status",
+            "orders": "Delivered orders",
+            "avg_delivery_days": "Average delivery days",
+            "late_delivery_pct": "Late delivery (%)",
+        }
+    )
     st.dataframe(delivery, width="stretch", hide_index=True)
-st.caption("GMV and average order value use order-item price and freight. Late delivery compares actual customer delivery with the estimated date.")
+with right:
+    st.subheader("Delivery and review score")
+    fig = px.bar(
+        review_delivery,
+        x="review_score",
+        y="late_delivery_pct",
+        hover_data={"orders": ":,", "avg_delivery_days": ":.1f"},
+        labels={
+            "review_score": "Average review score (1–5)",
+            "late_delivery_pct": "Late delivery (%)",
+        },
+    )
+    st.plotly_chart(fig, width="stretch")
+st.caption(
+    "All panels use the selected order-month range. GMV excludes freight; average order value "
+    "includes freight and is weighted by order count. Buyer totals are distinct across the full range. "
+    "Late delivery is measured among delivered orders with an estimated date; review scores are averaged per order."
+)

@@ -1,65 +1,111 @@
 # Brazilian E-Commerce Analytics
 
-An end-to-end portfolio project built on the Brazilian Olist marketplace dataset. It demonstrates a repeatable Python/Pandas ingestion pipeline, a constrained PostgreSQL relational model, SQL business analytics, data-quality checks, and an interactive Streamlit dashboard.
+An end-to-end analytics project built on Olist’s public Brazilian marketplace data. It turns nine source CSV files into a validated PostgreSQL model, creates SQL analytics views, and serves an interactive Streamlit dashboard.
 
-## What it answers
+## Project snapshot
 
-- How are orders, gross merchandise value, freight, and average order value changing over time?
-- Which product categories and states contribute the most sales?
-- How quickly are orders delivered, and how often do they arrive late?
-- How do review scores relate to delivery performance?
+- **Source data:** 9 CSVs, including 1,000,163 geolocation rows
+- **Loaded:** 99,441 customers, 99,441 orders, 112,650 order items, 103,886 payments, 99,224 reviews, plus product, seller, category, and geolocation records
+- **Analytics:** 24 monthly periods and 98,199 eligible orders in the loaded dataset
+- **Quality:** 9 database checks passed; 5 automated tests passed
 
-## Stack
+Counts describe the dataset version used for this local run. The original [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) is distributed separately; this repository contains project code, not the CSVs.
 
-Python 3.9+, Pandas, PostgreSQL, SQLAlchemy/psycopg, SQL, Streamlit, Plotly, Pytest, Git.
-The pipeline loads in chunks, and the dashboard queries aggregates from PostgreSQL rather than loading the million-row geolocation table into app memory.
+## Business questions
 
-## Dataset
+- How do order volume and merchandise sales change by month?
+- Which product categories and customer states contribute the most merchandise value?
+- How long do orders take to arrive, and what share arrive later than estimated?
+- How does delivery performance vary with customer review scores?
 
-Download/extract the public Olist Brazilian E-Commerce dataset. The expected nine files are:
+## Architecture
 
-`olist_customers_dataset.csv`, `olist_geolocation_dataset.csv`, `olist_order_items_dataset.csv`, `olist_order_payments_dataset.csv`, `olist_order_reviews_dataset.csv`, `olist_orders_dataset.csv`, `olist_products_dataset.csv`, `olist_sellers_dataset.csv`, and `product_category_name_translation.csv`.
+```mermaid
+flowchart LR
+    A[Olist CSV files] --> B[Python and Pandas ETL]
+    B --> C[Validate columns and keys]
+    C --> D[(PostgreSQL relational tables)]
+    D --> E[SQL analytics views]
+    E --> F[Streamlit dashboard]
+    F --> G[Plotly charts and KPIs]
+    D --> H[Database quality checks]
+```
 
-Keep the source files outside Git. Set `DATA_DIR` to their directory in `.env`, or pass `--data-dir` to the ETL. A `.env.example` is provided. This project does not modify source CSV files.
+The ETL validates the full input set before loading, parses dates and numeric values, and loads tables in foreign-key order. The database refresh runs in a transaction: if any load or check fails, PostgreSQL rolls back the refresh. Inserts are chunked for a modest local machine. The source CSVs are read-only inputs and are never modified.
 
-## Local setup (M1 friendly)
+## Data model
 
-1. Install PostgreSQL 15 or newer and start the local server. Create an empty database named `olist` (or use another name and update the URL).
-2. From this project directory, create and activate the project's isolated Anaconda/conda environment, then install its dependencies:
+```mermaid
+erDiagram
+    CUSTOMERS ||--o{ ORDERS : places
+    ORDERS ||--o{ ORDER_ITEMS : contains
+    ORDERS ||--o{ PAYMENTS : paid_by
+    ORDERS ||--o{ REVIEWS : receives
+    PRODUCTS ||--o{ ORDER_ITEMS : sold_as
+    SELLERS ||--o{ ORDER_ITEMS : fulfills
+    PRODUCTS }o--o| CATEGORY_TRANSLATION : translated_by
+```
+
+The `public` schema stores customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Foreign keys connect orders to customers and items/payments/reviews to their parent records. Olist reuses `review_id` across different orders, so reviews use the composite primary key `(review_id, order_id)`. Geolocation retains multiple rows per postal prefix and is indexed for lookup rather than forced into a one-row-per-prefix key.
+
+`sql/analytics.sql` creates:
+
+- `analytics.order_line_facts`: one row per order item with customer, product, category, seller, delivery, payment, and review context.
+- `analytics.monthly_sales`: monthly order, customer, merchandise, freight, and order-value aggregates.
+
+## Dashboard metrics
+
+All panels use the selected order-month range.
+
+- **GMV:** item price, excluding freight; canceled and unavailable orders are excluded.
+- **Average order value:** item price plus freight divided by eligible orders across the full selected range (a weighted value).
+- **Unique buyers:** distinct customer IDs across the full selected range, not a sum of monthly counts.
+- **Late delivery:** delivered after the estimated date, among delivered orders with an estimate.
+- **Review score:** mean review score per order, compared with delivery outcomes.
+
+## Run locally (macOS / Anaconda)
+
+1. Install and start PostgreSQL (Postgres.app works well on Apple silicon). Create a database named `olist`.
+2. From this project directory, create and activate the environment:
 
    ```bash
    conda env create -f environment.yml
    conda activate olist-analytics
    ```
 
-   Copy `.env.example` to `.env` only if `.env` does not already exist, then set its paths and database URL. The local `.env` is ignored by Git.
+3. Copy `.env.example` to `.env` once, then set the directory containing the nine CSVs and the PostgreSQL connection URL. For the default Postgres.app setup, use your macOS account name as the database user and leave the password blank. Example:
 
-3. Edit `.env` and set `DATA_DIR` and `DATABASE_URL` for your machine.
-4. Load the dataset (the reload is transactional and replaces only the project's target tables):
+   ```text
+   DATA_DIR=/path/to/olist-csv-folder
+   DATABASE_URL=postgresql+psycopg://your_mac_username@localhost:5432/olist
+   ```
+
+4. Load or refresh the database:
 
    ```bash
    python -m olist_analytics.etl
-   # or: olist-etl --data-dir /path/to/archive
    ```
 
-5. Start the dashboard:
+5. Run the tests and launch the dashboard:
 
    ```bash
+   pytest
    streamlit run app.py
    ```
 
-Run the tests with `pytest`. They cover source-file discovery, transformation rules, and SQL data-quality checks.
+The local `.env`, downloaded data, Python caches, and package build metadata are excluded from Git. The ETL replaces only the project’s target tables in the configured database.
 
-## Model and pipeline
+## Repository layout
 
-The `public` schema contains normalized source entities: customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Primary keys and foreign keys are created from `sql/schema.sql`; reviews use the composite key `(review_id, order_id)` because the source reuses `review_id` across different orders. CSVs load in dependency order using bounded chunks. The ETL validates required files and columns, parses dates/numbers, checks key uniqueness and referential integrity, then refreshes the tables.
+```text
+app.py                       Streamlit dashboard
+src/olist_analytics/         ETL, configuration, and quality checks
+sql/schema.sql               Relational tables, constraints, and indexes
+sql/analytics.sql            Dashboard-ready SQL views
+tests/                       Automated tests
+environment.yml              Reproducible Conda environment
+```
 
-`sql/analytics.sql` creates two query-ready views: `analytics.order_line_facts` (one row per order item, with customer, product, seller, delivery, payment, and review context) and `analytics.monthly_sales` (monthly KPI aggregates). The Streamlit app uses read-only SQL queries against these views.
+## Skills demonstrated
 
-## Data quality
-
-The ETL fails before replacing database contents if source files, required columns, primary-key uniqueness, or foreign-key relationships are invalid. After loading, SQL checks report row counts, duplicate keys, orphan relationships, invalid review scores, and negative monetary values. Expected blanks in optional delivery timestamps and product attributes are retained as nulls.
-
-## Suggested GitHub presentation
-
-Commit the code, SQL, tests, and documentation. Keep `.env`, credentials, and original CSV files out of Git. Add screenshots of the dashboard after the first successful load. Do not publish a remote repository until its destination is chosen.
+Python and Pandas ingestion, PostgreSQL schema design, SQL modeling and aggregation, transactional ETL, data-quality validation, dashboarding, and automated tests.

@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from .config import data_dir, database_url
-from .quality import validate_data_dir, check_database
+from .quality import check_database, validate_data_dir
 
 ORDER = ["customers", "sellers", "products", "category_translation", "orders", "order_items", "payments", "reviews", "geolocation"]
 TABLES = {"category_translation": "category_translation"}

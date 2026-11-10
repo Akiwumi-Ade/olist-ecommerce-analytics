@@ -1,9 +1,11 @@
 from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from olist_analytics.etl import load_frame
 from olist_analytics.quality import validate_data_dir
+
 
 def test_validate_data_dir_reports_missing_inputs(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="Missing required Olist CSV files"):
@@ -21,8 +23,8 @@ def test_load_frame_parses_order_timestamps(tmp_path: Path):
     assert pd.isna(frame.loc[0, "order_approved_at"])
 
 def test_validate_data_dir_accepts_complete_minimal_files(tmp_path: Path):
-    from olist_analytics.quality import REQUIRED_COLUMNS
     from olist_analytics.config import EXPECTED_FILES
+    from olist_analytics.quality import REQUIRED_COLUMNS
     for key, name in EXPECTED_FILES.items():
         pd.DataFrame(columns=REQUIRED_COLUMNS[key]).to_csv(tmp_path / name, index=False)
     result = validate_data_dir(tmp_path)
