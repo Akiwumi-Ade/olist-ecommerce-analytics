@@ -1,4 +1,5 @@
 """Runtime configuration loaded from environment and optional .env file."""
+
 from __future__ import annotations
 
 import os
@@ -20,11 +21,13 @@ EXPECTED_FILES = {
     "category_translation": "product_category_name_translation.csv",
 }
 
+
 def data_dir(override: str | None = None) -> Path:
     value = override or os.getenv("DATA_DIR")
     if not value:
         raise ValueError("Set DATA_DIR in .env or pass --data-dir pointing to the Olist CSV folder")
     return Path(value).expanduser().resolve()
+
 
 def database_url() -> str:
     value = os.getenv("DATABASE_URL")

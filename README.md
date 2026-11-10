@@ -9,7 +9,7 @@ I built a reproducible pipeline that takes nine raw CSV files, validates and loa
 - A **Python and Pandas ETL pipeline** that checks the input files, parses dates and numeric fields, and loads tables in foreign-key order.
 - A **relational PostgreSQL model** with primary keys, foreign keys, and indexes for the Olist data.
 - **SQL analytics views** that combine order, item, customer, product, seller, payment, delivery, and review information.
-- **Data-quality checks and automated tests** to catch missing tables, broken relationships, and invalid values.
+- **Data-quality checks and automated tests** for the required source files and columns, duplicate keys, broken relationships, and invalid values.
 - A **Streamlit dashboard** with Plotly charts and a month-range filter for exploring sales, product categories, customer locations, delivery outcomes, and review scores.
 
 ## Questions explored
@@ -21,9 +21,18 @@ I built a reproducible pipeline that takes nine raw CSV files, validates and loa
 
 ## Project at a glance
 
-The local run represented in this project loaded **99,441 orders** from nine source CSVs, including **112,650 order items**, **103,886 payments**, and **99,224 reviews**. The analysis covers 24 monthly periods and 98,199 eligible orders. Nine database quality checks and five automated tests passed in that run.
+The local run represented in this project loaded **99,441 orders** from nine source CSVs, including **112,650 order items**, **103,886 payments**, and **99,224 reviews**. The analysis covers 24 monthly periods and 98,199 eligible orders. Nine database quality checks and eight automated tests passed in the current codebase.
 
 These counts describe the dataset version used for the local run; they are not live marketplace figures. The original [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) is distributed separately and is not stored in this repository.
+
+## Selected findings
+
+- **November 2017** was the highest-GMV month, at approximately **R$1.00 million**.
+- **Health and beauty** was the largest product category by GMV, at approximately **R$1.26 million**. São Paulo (SP) led customer-state GMV at approximately **R$5.16 million**.
+- Among delivered orders with both dates, the average elapsed delivery time was **12.6 days** and **6.8%** arrived after the estimated calendar date.
+- The late-delivery rate was **36.8%** for delivered orders with an average review score of 1, compared with **1.9%** for score 5. This is a descriptive relationship in the dataset, not evidence that late delivery alone caused a low review.
+
+These are descriptive results from this dataset version. The dashboard lets readers explore the measures by month, category, state, delivery outcome, and review score.
 
 ## How it works
 
@@ -46,9 +55,10 @@ The PostgreSQL `public` schema contains customers, sellers, products, category t
 
 The source reuses `review_id` for multiple orders, so the review table uses the composite key `(review_id, order_id)`. Geolocation contains multiple coordinates for some postal prefixes; the model preserves those records rather than arbitrarily selecting one.
 
-The SQL layer creates two views:
+The SQL layer separates order-level measures from item-level dimensions to prevent payment and review totals from being repeated across an order's item rows. It creates three views:
 
-- `analytics.order_line_facts`: an order-item-level view with customer, product, category, seller, payment, delivery, and review context.
+- `analytics.order_facts`: one row per order with item and freight totals, payment total, review score, customer, and delivery context.
+- `analytics.order_line_facts`: one row per order item with customer, product, category, seller, price, and freight context.
 - `analytics.monthly_sales`: a monthly summary of orders, buyers, merchandise value, freight, and average order value.
 
 ## Dashboard measures
@@ -58,7 +68,7 @@ All dashboard panels follow the selected order-month range.
 - **GMV** is item price before freight; canceled and unavailable orders are excluded.
 - **Average order value** includes item price and freight and is weighted across eligible orders in the selected range.
 - **Unique buyers** counts distinct customers across the full range.
-- **Late delivery** means delivery after the estimated date, among delivered orders with an estimate.
+- **Late delivery** means arrival on a calendar date after the estimated date, among delivered orders with an estimate.
 - **Review score** is averaged per order before comparing it with delivery outcomes.
 
 ## Tools and skills demonstrated

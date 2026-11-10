@@ -1,4 +1,5 @@
 """Chunked and repeatable CSV-to-PostgreSQL pipeline."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,15 +9,36 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 from .config import data_dir, database_url
-from .quality import check_database, validate_data_dir
+from .quality import check_connection, validate_data_dir
 
-ORDER = ["customers", "sellers", "products", "category_translation", "orders", "order_items", "payments", "reviews", "geolocation"]
-TABLES = {"category_translation": "category_translation"}
+ORDER = [
+    "customers",
+    "sellers",
+    "products",
+    "category_translation",
+    "orders",
+    "order_items",
+    "payments",
+    "reviews",
+    "geolocation",
+]
 DATE_COLUMNS = {
-    "orders": ["order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date", "order_delivered_customer_date", "order_estimated_delivery_date"],
-    "order_items": ["shipping_limit_date"], "reviews": ["review_creation_date", "review_answer_timestamp"],
+    "orders": [
+        "order_purchase_timestamp",
+        "order_approved_at",
+        "order_delivered_carrier_date",
+        "order_delivered_customer_date",
+        "order_estimated_delivery_date",
+    ],
+    "order_items": ["shipping_limit_date"],
+    "reviews": ["review_creation_date", "review_answer_timestamp"],
 }
-NUMERIC_COLUMNS = {"order_items": ["price", "freight_value"], "payments": ["payment_value"], "geolocation": ["geolocation_lat", "geolocation_lng"]}
+NUMERIC_COLUMNS = {
+    "order_items": ["price", "freight_value"],
+    "payments": ["payment_value"],
+    "geolocation": ["geolocation_lat", "geolocation_lng"],
+}
+
 
 def load_frame(path: Path, table: str) -> pd.DataFrame:
     frame = pd.read_csv(path)
@@ -33,33 +55,47 @@ def load_frame(path: Path, table: str) -> pd.DataFrame:
         frame["review_score"] = frame["review_score"].astype("int64")
     return frame
 
+
 def run_etl(folder: Path, url: str) -> list[dict[str, object]]:
     paths = validate_data_dir(folder)  # Fail before touching database if input is incomplete.
     engine = create_engine(url, pool_pre_ping=True)
     schema_sql = Path(__file__).resolve().parents[2] / "sql" / "schema.sql"
     analytics_sql = Path(__file__).resolve().parents[2] / "sql" / "analytics.sql"
+    loaded_rows: list[tuple[str, int]] = []
     try:
         with engine.begin() as conn:
             conn.exec_driver_sql(schema_sql.read_text())
-            conn.exec_driver_sql("TRUNCATE TABLE geolocation, reviews, payments, order_items, orders, category_translation, products, sellers, customers CASCADE")
+            conn.exec_driver_sql(
+                "TRUNCATE TABLE geolocation, reviews, payments, order_items, orders, "
+                "category_translation, products, sellers, customers"
+            )
             for name in ORDER:
                 frame = load_frame(paths[name], name)
                 # 5k keeps multi-row inserts below PostgreSQL's bind-parameter limit.
-                frame.to_sql(name, conn, if_exists="append", index=False, chunksize=5_000, method="multi")
-                print(f"Loaded {len(frame):,} rows into {name}")
+                frame.to_sql(
+                    name, conn, if_exists="append", index=False, chunksize=5_000, method="multi"
+                )
+                loaded_rows.append((name, len(frame)))
             conn.exec_driver_sql(analytics_sql.read_text())
-        results = check_database(engine)
+            # Keep validation in the same transaction so a failed check rolls back the refresh.
+            results = check_connection(conn)
+        for name, count in loaded_rows:
+            print(f"Loaded {count:,} rows into {name}")
         print(f"Data quality: {len(results)} checks passed")
         return results
     finally:
         engine.dispose()
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", help="Folder containing the nine Olist CSV files")
-    parser.add_argument("--database-url", help="SQLAlchemy PostgreSQL URL (defaults to DATABASE_URL)")
+    parser.add_argument(
+        "--database-url", help="SQLAlchemy PostgreSQL URL (defaults to DATABASE_URL)"
+    )
     args = parser.parse_args()
     run_etl(data_dir(args.data_dir), args.database_url or database_url())
+
 
 if __name__ == "__main__":
     main()

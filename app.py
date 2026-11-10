@@ -1,4 +1,5 @@
 """Streamlit dashboard for the Olist PostgreSQL analytics model."""
+
 from __future__ import annotations
 
 import os
@@ -102,10 +103,10 @@ try:
         engine,
         """SELECT order_status,
             count(*) AS orders,
-            avg(EXTRACT(EPOCH FROM (order_delivered_customer_date - order_purchase_timestamp)) / 86400.0) AS avg_delivery_days,
-            100.0 * count(*) FILTER (WHERE order_delivered_customer_date > order_estimated_delivery_date)
+            avg(delivery_days) AS avg_delivery_days,
+            100.0 * count(*) FILTER (WHERE is_late)
                 / NULLIF(count(*) FILTER (WHERE order_estimated_delivery_date IS NOT NULL), 0) AS late_delivery_pct
-        FROM orders
+        FROM analytics.order_facts
         WHERE order_purchase_timestamp >= :start_month
           AND order_purchase_timestamp < :end_month
           AND order_delivered_customer_date IS NOT NULL
@@ -114,23 +115,25 @@ try:
     )
     review_delivery = query_df(
         engine,
-        """WITH reviews_by_order AS (
-            SELECT order_id, avg(review_score)::numeric(3,1) AS review_score
-            FROM reviews GROUP BY order_id
-        )
-        SELECT r.review_score, count(*) AS orders,
-            avg(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_purchase_timestamp)) / 86400.0) AS avg_delivery_days,
-            100.0 * count(*) FILTER (WHERE o.order_delivered_customer_date > o.order_estimated_delivery_date)
-                / NULLIF(count(*) FILTER (WHERE o.order_estimated_delivery_date IS NOT NULL), 0) AS late_delivery_pct
-        FROM orders o JOIN reviews_by_order r USING (order_id)
-        WHERE o.order_purchase_timestamp >= :start_month
-          AND o.order_purchase_timestamp < :end_month
-          AND o.order_delivered_customer_date IS NOT NULL
-        GROUP BY r.review_score ORDER BY r.review_score""",
+        """SELECT review_score, count(*) AS orders,
+            avg(delivery_days) AS avg_delivery_days,
+            100.0 * count(*) FILTER (WHERE is_late)
+                / NULLIF(count(*) FILTER (WHERE order_estimated_delivery_date IS NOT NULL), 0) AS late_delivery_pct
+        FROM analytics.order_facts
+        WHERE order_purchase_timestamp >= :start_month
+          AND order_purchase_timestamp < :end_month
+          AND order_delivered_customer_date IS NOT NULL
+          AND review_score IS NOT NULL
+        GROUP BY review_score ORDER BY review_score""",
         params,
     )
 except SQLAlchemyError as exc:
-    st.error(f"Could not query the analytics database: {exc}")
+    st.error(
+        "The dashboard could not load its analytics. Check that PostgreSQL is running, "
+        "DATABASE_URL is correct, and the ETL pipeline has completed."
+    )
+    with st.expander("Technical details"):
+        st.code(str(exc.orig))
     st.stop()
 
 st.sidebar.divider()
