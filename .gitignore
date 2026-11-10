@@ -9,3 +9,7 @@ data/raw/*
 
 .DS_Store
 *.egg-info/
+
+# Original browser captures are kept locally; README uses the cleaned preview.
+docs/dashboard*.jpg
+!docs/dashboard-preview.jpg

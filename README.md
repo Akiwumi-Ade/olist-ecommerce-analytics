@@ -29,6 +29,10 @@ The local run represented in this project loaded **99,441 orders** from nine sou
 
 These counts describe the dataset version used for the local run; they are not live marketplace figures. The original [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) is distributed separately and is not stored in this repository.
 
+## Dashboard preview
+
+![Dashboard preview showing the order-month filter, marketplace KPIs, monthly sales and order trends, and the leading product categories and customer states.](docs/dashboard-preview.jpg)
+
 ## Selected findings
 
 - **November 2017** was the highest-GMV month, at approximately **R$1.00 million**.
@@ -123,5 +127,6 @@ src/olist_analytics/         ETL, configuration, and quality checks
 sql/schema.sql               Relational tables, constraints, and indexes
 sql/analytics.sql            Dashboard-ready SQL views
 tests/                       Automated tests
+docs/dashboard-preview.jpg   Dashboard screenshot used in this README
 environment.yml              Conda environment definition
 ```
