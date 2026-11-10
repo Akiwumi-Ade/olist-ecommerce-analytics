@@ -1,29 +1,36 @@
 # Brazilian E-Commerce Analytics
 
-An end-to-end analytics project built on Olist’s public Brazilian marketplace data. It turns nine source CSV files into a validated PostgreSQL model, creates SQL analytics views, and serves an interactive Streamlit dashboard.
+**An end-to-end data engineering and analytics portfolio project** using public data from Brazil's Olist marketplace.
 
-## Project snapshot
+I built a reproducible pipeline that takes nine raw CSV files, validates and loads them into a relational PostgreSQL database, and turns them into SQL analytics views and an interactive dashboard. The project explores marketplace sales, delivery performance, and customer experience across nearly 100,000 orders.
 
-- **Source data:** 9 CSVs, including 1,000,163 geolocation rows
-- **Loaded:** 99,441 customers, 99,441 orders, 112,650 order items, 103,886 payments, 99,224 reviews, plus product, seller, category, and geolocation records
-- **Analytics:** 24 monthly periods and 98,199 eligible orders in the loaded dataset
-- **Quality:** 9 database checks passed; 5 automated tests passed
+## What the project delivers
 
-Counts describe the dataset version used for this local run. The original [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) is distributed separately; this repository contains project code, not the CSVs.
+- A **Python and Pandas ETL pipeline** that checks the input files, parses dates and numeric fields, and loads tables in foreign-key order.
+- A **relational PostgreSQL model** with primary keys, foreign keys, and indexes for the Olist data.
+- **SQL analytics views** that combine order, item, customer, product, seller, payment, delivery, and review information.
+- **Data-quality checks and automated tests** to catch missing tables, broken relationships, and invalid values.
+- A **Streamlit dashboard** with Plotly charts and a month-range filter for exploring sales, product categories, customer locations, delivery outcomes, and review scores.
 
-## Business questions
+## Questions explored
 
-- How do order volume and merchandise sales change by month?
-- Which product categories and customer states contribute the most merchandise value?
-- How long do orders take to arrive, and what share arrive later than estimated?
-- How does delivery performance vary with customer review scores?
+- How do order volume and merchandise sales change over time?
+- Which product categories and customer states contribute most to merchandise value?
+- How long do orders take to arrive, and how often do they arrive after the estimated date?
+- How does delivery performance relate to customer review scores?
 
-## Architecture
+## Project at a glance
+
+The local run represented in this project loaded **99,441 orders** from nine source CSVs, including **112,650 order items**, **103,886 payments**, and **99,224 reviews**. The analysis covers 24 monthly periods and 98,199 eligible orders. Nine database quality checks and five automated tests passed in that run.
+
+These counts describe the dataset version used for the local run; they are not live marketplace figures. The original [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) is distributed separately and is not stored in this repository.
+
+## How it works
 
 ```mermaid
 flowchart LR
     A[Olist CSV files] --> B[Python and Pandas ETL]
-    B --> C[Validate columns and keys]
+    B --> C[Input validation]
     C --> D[(PostgreSQL relational tables)]
     D --> E[SQL analytics views]
     E --> F[Streamlit dashboard]
@@ -31,71 +38,70 @@ flowchart LR
     D --> H[Database quality checks]
 ```
 
-The ETL validates the full input set before loading, parses dates and numeric values, and loads tables in foreign-key order. The database refresh runs in a transaction: if any load or check fails, PostgreSQL rolls back the refresh. Inserts are chunked for a modest local machine. The source CSVs are read-only inputs and are never modified.
+The ETL checks the expected inputs before changing the database. It refreshes the project tables in a transaction, so a failed load rolls back instead of leaving a partial refresh. Inserts are chunked to keep the workflow practical on a lightweight local machine. Source CSV files are read-only inputs.
 
-## Data model
+## Data model and analytical layer
 
-```mermaid
-erDiagram
-    CUSTOMERS ||--o{ ORDERS : places
-    ORDERS ||--o{ ORDER_ITEMS : contains
-    ORDERS ||--o{ PAYMENTS : paid_by
-    ORDERS ||--o{ REVIEWS : receives
-    PRODUCTS ||--o{ ORDER_ITEMS : sold_as
-    SELLERS ||--o{ ORDER_ITEMS : fulfills
-    PRODUCTS }o--o| CATEGORY_TRANSLATION : translated_by
-```
+The PostgreSQL `public` schema contains customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Foreign keys preserve relationships between orders and customers, and between orders and their items, payments, and reviews.
 
-The `public` schema stores customers, sellers, products, category translations, orders, order items, payments, reviews, and geolocation. Foreign keys connect orders to customers and items/payments/reviews to their parent records. Olist reuses `review_id` across different orders, so reviews use the composite primary key `(review_id, order_id)`. Geolocation retains multiple rows per postal prefix and is indexed for lookup rather than forced into a one-row-per-prefix key.
+The source reuses `review_id` for multiple orders, so the review table uses the composite key `(review_id, order_id)`. Geolocation contains multiple coordinates for some postal prefixes; the model preserves those records rather than arbitrarily selecting one.
 
-`sql/analytics.sql` creates:
+The SQL layer creates two views:
 
-- `analytics.order_line_facts`: one row per order item with customer, product, category, seller, delivery, payment, and review context.
-- `analytics.monthly_sales`: monthly order, customer, merchandise, freight, and order-value aggregates.
+- `analytics.order_line_facts`: an order-item-level view with customer, product, category, seller, payment, delivery, and review context.
+- `analytics.monthly_sales`: a monthly summary of orders, buyers, merchandise value, freight, and average order value.
 
-## Dashboard metrics
+## Dashboard measures
 
-All panels use the selected order-month range.
+All dashboard panels follow the selected order-month range.
 
-- **GMV:** item price, excluding freight; canceled and unavailable orders are excluded.
-- **Average order value:** item price plus freight divided by eligible orders across the full selected range (a weighted value).
-- **Unique buyers:** distinct customer IDs across the full selected range, not a sum of monthly counts.
-- **Late delivery:** delivered after the estimated date, among delivered orders with an estimate.
-- **Review score:** mean review score per order, compared with delivery outcomes.
+- **GMV** is item price before freight; canceled and unavailable orders are excluded.
+- **Average order value** includes item price and freight and is weighted across eligible orders in the selected range.
+- **Unique buyers** counts distinct customers across the full range.
+- **Late delivery** means delivery after the estimated date, among delivered orders with an estimate.
+- **Review score** is averaged per order before comparing it with delivery outcomes.
 
-## Run locally (macOS / Anaconda)
+## Tools and skills demonstrated
 
-1. Install and start PostgreSQL (Postgres.app works well on Apple silicon). Create a database named `olist`.
-2. From this project directory, create and activate the environment:
+Python · Pandas · PostgreSQL · SQL · SQLAlchemy · Streamlit · Plotly · Pytest · Git
+
+This project demonstrates data ingestion, schema design, transactional loading, SQL modeling, data validation, analytical dashboarding, and reproducible project setup.
+
+## Run locally
+
+The following steps reproduce the project on macOS with Anaconda and PostgreSQL.
+
+1. Install and start PostgreSQL, then create a database named `olist`.
+2. Create and activate the Conda environment:
 
    ```bash
    conda env create -f environment.yml
    conda activate olist-analytics
    ```
 
-3. Copy `.env.example` to `.env` once, then set the directory containing the nine CSVs and the PostgreSQL connection URL. For the default Postgres.app setup, use your macOS account name as the database user and leave the password blank. Example:
+3. Copy `.env.example` to `.env`, then set the location of the nine Olist CSV files and the database connection URL. With the default Postgres.app setup, the database user is usually your macOS account name:
 
-   ```text
+   ```ini
    DATA_DIR=/path/to/olist-csv-folder
    DATABASE_URL=postgresql+psycopg://your_mac_username@localhost:5432/olist
    ```
 
-4. Load or refresh the database:
+4. Load the source data and build the analytics views:
 
    ```bash
    python -m olist_analytics.etl
    ```
 
-5. Run the tests and launch the dashboard:
+5. Check the project and start the dashboard:
 
    ```bash
    pytest
    streamlit run app.py
    ```
 
-The local `.env`, downloaded data, Python caches, and package build metadata are excluded from Git. The ETL replaces only the project’s target tables in the configured database.
+The `.env` file, downloaded data, Python caches, and build metadata are excluded from Git. The ETL replaces only the project's target tables in the configured database.
 
-## Repository layout
+## Repository structure
 
 ```text
 app.py                       Streamlit dashboard
@@ -103,9 +109,5 @@ src/olist_analytics/         ETL, configuration, and quality checks
 sql/schema.sql               Relational tables, constraints, and indexes
 sql/analytics.sql            Dashboard-ready SQL views
 tests/                       Automated tests
-environment.yml              Reproducible Conda environment
+environment.yml              Conda environment definition
 ```
-
-## Skills demonstrated
-
-Python and Pandas ingestion, PostgreSQL schema design, SQL modeling and aggregation, transactional ETL, data-quality validation, dashboarding, and automated tests.
