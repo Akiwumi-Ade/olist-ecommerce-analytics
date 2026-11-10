@@ -1,0 +1,54 @@
+"""Source and database data-quality checks."""
+from __future__ import annotations
+
+from pathlib import Path
+import pandas as pd
+
+from .config import EXPECTED_FILES
+
+REQUIRED_COLUMNS = {
+    "customers": ["customer_id", "customer_unique_id", "customer_zip_code_prefix", "customer_city", "customer_state"],
+    "geolocation": ["geolocation_zip_code_prefix", "geolocation_lat", "geolocation_lng", "geolocation_city", "geolocation_state"],
+    "order_items": ["order_id", "order_item_id", "product_id", "seller_id", "shipping_limit_date", "price", "freight_value"],
+    "payments": ["order_id", "payment_sequential", "payment_type", "payment_installments", "payment_value"],
+    "reviews": ["review_id", "order_id", "review_score"],
+    "orders": ["order_id", "customer_id", "order_status", "order_purchase_timestamp"],
+    "products": ["product_id", "product_category_name"],
+    "sellers": ["seller_id", "seller_zip_code_prefix", "seller_city", "seller_state"],
+    "category_translation": ["product_category_name", "product_category_name_english"],
+}
+
+def validate_data_dir(folder: Path) -> dict[str, Path]:
+    missing = [name for name in EXPECTED_FILES.values() if not (folder / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"Missing required Olist CSV files in {folder}: {', '.join(missing)}")
+    paths = {key: folder / filename for key, filename in EXPECTED_FILES.items()}
+    for key, path in paths.items():
+        columns = pd.read_csv(path, nrows=0).columns.tolist()
+        absent = sorted(set(REQUIRED_COLUMNS[key]) - set(columns))
+        if absent:
+            raise ValueError(f"{path.name} is missing required columns: {', '.join(absent)}")
+    return paths
+
+def check_database(engine) -> list[dict[str, object]]:
+    """Return named quality check results; raise for any failed invariant."""
+    checks = {
+        "duplicate customer ids": "SELECT count(*) FROM (SELECT customer_id FROM customers GROUP BY 1 HAVING count(*) > 1) q",
+        "duplicate order ids": "SELECT count(*) FROM (SELECT order_id FROM orders GROUP BY 1 HAVING count(*) > 1) q",
+        "orphan order customers": "SELECT count(*) FROM orders o LEFT JOIN customers c USING (customer_id) WHERE c.customer_id IS NULL",
+        "orphan item orders": "SELECT count(*) FROM order_items i LEFT JOIN orders o USING (order_id) WHERE o.order_id IS NULL",
+        "orphan item products": "SELECT count(*) FROM order_items i LEFT JOIN products p USING (product_id) WHERE p.product_id IS NULL",
+        "orphan item sellers": "SELECT count(*) FROM order_items i LEFT JOIN sellers s USING (seller_id) WHERE s.seller_id IS NULL",
+        "invalid review scores": "SELECT count(*) FROM reviews WHERE review_score NOT BETWEEN 1 AND 5",
+        "negative item amounts": "SELECT count(*) FROM order_items WHERE price < 0 OR freight_value < 0",
+        "negative payment values": "SELECT count(*) FROM payments WHERE payment_value < 0",
+    }
+    results = []
+    with engine.connect() as connection:
+        for name, sql in checks.items():
+            count = int(connection.exec_driver_sql(sql).scalar_one())
+            results.append({"check": name, "violations": count, "passed": count == 0})
+    failures = [r for r in results if not r["passed"]]
+    if failures:
+        raise ValueError("Database quality checks failed: " + "; ".join(f"{x['check']} ({x['violations']})" for x in failures))
+    return results
