@@ -25,15 +25,14 @@ Keep the source files outside Git. Set `DATA_DIR` to their directory in `.env`, 
 ## Local setup (M1 friendly)
 
 1. Install PostgreSQL 15 or newer and start the local server. Create an empty database named `olist` (or use another name and update the URL).
-2. From this project directory, create a Python virtual environment and install dependencies:
+2. From this project directory, create and activate the project's isolated Anaconda/conda environment, then install its dependencies:
 
    ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   python -m pip install --upgrade pip
-   pip install -r requirements.txt
-   cp .env.example .env
+   conda env create -f environment.yml
+   conda activate olist-analytics
    ```
+
+   Copy `.env.example` to `.env` only if `.env` does not already exist, then set its paths and database URL. The local `.env` is ignored by Git.
 
 3. Edit `.env` and set `DATA_DIR` and `DATABASE_URL` for your machine.
 4. Load the dataset (the reload is transactional and replaces only the project's target tables):
